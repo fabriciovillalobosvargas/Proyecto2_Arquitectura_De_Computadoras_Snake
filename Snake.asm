@@ -61,6 +61,23 @@ color_cabeza: .word 0x00CCFF00
 color_cuerpo: .word 0x00008800
 color_comida: .word 0x00FF0000
 
+
+# ==============================================
+# OBSTACULOS DEL JUEGO - ETAPA 6
+# Cada par representa una posicion (X,Y)
+# ==============================================
+
+.align 2
+
+cantidad_obstaculos: .word 12
+
+obstaculos: .word 8,8, 9,8, 10,8
+            .word 22,8, 22,9, 22,10
+            .word 8,22, 9,22, 10,22
+            .word 22,22, 22,23, 22,24
+
+color_obstaculo: .word 0x00AAAAAA
+
 .text
 .globl main
 
@@ -105,10 +122,13 @@ iniciar_partida:
     # Reiniciar serpiente y puntuacion
     jal iniciar_serpiente
 
-    # Limpiar y dibujar tablero
+  # Limpiar y dibujar tablero
     jal dibujar_tablero
 
-    # Primera comida
+    # Dibujar los obstaculos
+    jal dibujar_obstaculos
+
+    # Generar primera comida
     jal generar_comida
 
     # Dibujar serpiente
@@ -595,7 +615,7 @@ intentar_comida:
     li $s3, 0
 
 revisar_comida:
-    bge $s3, $s2, comida_valida
+    bge $s3, $s2, revisar_obstaculos_comida
 
     sll $t0, $s3, 2
 
@@ -614,6 +634,25 @@ revisar_comida:
 siguiente_revision:
     addiu $s3, $s3, 1
     j revisar_comida
+
+# VERIFICAR QUE LA COMIDA NO APAREZCA
+# ENCIMA DE UN OBSTACULO
+# ==============================================
+
+revisar_obstaculos_comida:
+
+    # Coordenadas propuestas para la comida
+    move $a0, $s0
+    move $a1, $s1
+
+    # Revisar si existe obstaculo
+    jal verificar_obstaculo
+
+    # Si existe, buscar otra posicion
+    bne $v0, $zero, intentar_comida
+
+    # Si esta libre, aceptar comida
+    j comida_valida
 
 comida_valida:
 
@@ -698,6 +737,7 @@ ir_arriba:
 
 comprobar_pared:
 
+    # Comprobar limites del tablero
     blez $s3, colision
     blez $s4, colision
 
@@ -705,6 +745,16 @@ comprobar_pared:
     bge $s3, $t0, colision
     bge $s4, $t0, colision
 
+    # Comprobar colision con obstaculos
+    move $a0, $s3
+    move $a1, $s4
+
+    jal verificar_obstaculo
+
+    # Si v0 = 1, existe colision
+    bne $v0, $zero, colision
+
+    # Continuar con la logica de comida
     li $s5, 0
 
     lw $t0, comida_x
@@ -899,3 +949,117 @@ mostrar_puntos:
     syscall
 
     jr $ra
+
+
+
+# ==============================================
+# DIBUJAR OBSTACULOS
+# ==============================================
+
+dibujar_obstaculos:
+
+    # Guardar registros
+    addiu $sp, $sp, -24
+    sw $ra, 20($sp)
+    sw $s0, 16($sp)
+    sw $s1, 12($sp)
+    sw $s2, 8($sp)
+
+    # Direccion del arreglo
+    la $s0, obstaculos
+
+    # Cantidad de obstaculos
+    lw $s1, cantidad_obstaculos
+
+    # Contador
+    li $s2, 0
+
+ciclo_obstaculos:
+
+    bge $s2, $s1, fin_obstaculos
+
+    # Obtener coordenada X
+    lw $a0, 0($s0)
+
+    # Obtener coordenada Y
+    lw $a1, 4($s0)
+
+    # Color gris
+    lw $a2, color_obstaculo
+
+    # Pintar celda
+    jal pintar_celda
+
+    # Siguiente par de coordenadas
+    addiu $s0, $s0, 8
+    addiu $s2, $s2, 1
+
+    j ciclo_obstaculos
+
+fin_obstaculos:
+
+    # Restaurar registros
+    lw $s2, 8($sp)
+    lw $s1, 12($sp)
+    lw $s0, 16($sp)
+    lw $ra, 20($sp)
+    addiu $sp, $sp, 24
+
+    jr $ra
+    
+    
+    
+# ==============================================
+# VERIFICAR OBSTACULO
+# Entradas:
+# a0 = coordenada X
+# a1 = coordenada Y
+#
+# Salida:
+# v0 = 1 si hay obstaculo
+# v0 = 0 si no hay obstaculo
+# ==============================================
+
+verificar_obstaculo:
+
+    la $t0, obstaculos
+
+    lw $t1, cantidad_obstaculos
+
+    li $t2, 0
+
+buscar_obstaculo:
+
+    # Revisar todos los obstaculos
+    bge $t2, $t1, sin_obstaculo
+
+    # Obtener X del obstaculo
+    lw $t3, 0($t0)
+
+    # Obtener Y del obstaculo
+    lw $t4, 4($t0)
+
+    # Comparar coordenada X
+    bne $a0, $t3, siguiente_obstaculo
+
+    # Comparar coordenada Y
+    beq $a1, $t4, choque_obstaculo
+
+siguiente_obstaculo:
+
+    # Avanzar 8 bytes
+    addiu $t0, $t0, 8
+    addiu $t2, $t2, 1
+
+    j buscar_obstaculo
+
+choque_obstaculo:
+
+    li $v0, 1
+    jr $ra
+
+sin_obstaculo:
+
+    move $v0, $zero
+    jr $ra
+
