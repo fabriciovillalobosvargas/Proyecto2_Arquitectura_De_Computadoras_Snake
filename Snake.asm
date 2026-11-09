@@ -10,11 +10,11 @@
 
 .data
 
-mensaje:      .asciiz "SNAKE - ETAPA 5\n"
+mensaje:      .asciiz "SNAKE"
 controles:    .asciiz "Controles: W A S D (Keyboard MMIO)\n"
 msg_puntos:   .asciiz "Puntuacion: "
 msg_fin:      .asciiz "\nGAME OVER! Colision detectada.\n"
-msg_victoria: .asciiz "\nVICTORIA! Tablero completado.\n"
+msg_victoria: .asciiz "\nVICTORIA! Alcanzaste la meta de puntos.\n"
 salto:        .asciiz "\n"
 
 .align 2
@@ -62,11 +62,8 @@ color_cuerpo: .word 0x00008800
 color_comida: .word 0x00FF0000
 
 
-# ==============================================
-# OBSTACULOS DEL JUEGO - ETAPA 6
+# OBSTACULOS DEL JUEGO 
 # Cada par representa una posicion (X,Y)
-# ==============================================
-
 .align 2
 
 cantidad_obstaculos: .word 12
@@ -78,12 +75,31 @@ obstaculos: .word 8,8, 9,8, 10,8
 
 color_obstaculo: .word 0x00AAAAAA
 
+
+
+# VELOCIDAD Y COMIDA ESPECIAL
+
+
+.align 2
+
+velocidad_ms: .word 180
+nivel: .word 1
+comidas_consumidas: .word 0
+tipo_comida: .word 0
+
+color_especial: .word 0x00FFFF00
+
+meta_puntos: .word 100
+
+msg_nivel: .asciiz "Nivel actual: "
+msg_especial: .asciiz "Comida especial! +30 puntos\n"
+
+
 .text
 .globl main
 
-
-# PROGRAMA PRINCIPAL - ETAPA 5
 # ==============================================
+# PROGRAMA PRINCIPAL 
 
 main:
 menu_principal:
@@ -184,17 +200,18 @@ ciclo_juego:
 dibujar_nueva_posicion:
 
     jal dibujar_serpiente
-
-    # Esperar entre movimientos
+    
+    # Esperar segun la dificultad actual
     li $v0, 32
-    li $a0, 180
+    lw $a0, velocidad_ms
     syscall
+
 
     j ciclo_juego
 
 
 # ==============================================
-# ESTADO DE PAUSA
+# PAUSA
 # ==============================================
 
 abrir_pausa:
@@ -240,9 +257,9 @@ reanudar_juego:
     j ciclo_juego
 
 
-# ==============================================
+# ============================
 # GAME OVER
-# ==============================================
+# ============================
 
 game_over:
 
@@ -258,25 +275,28 @@ game_over:
     j mostrar_resultado
 
 
-# ==============================================
+# ==============================
 # VICTORIA
-# ==============================================
+# ==============================
 
 victoria:
 
     li $t0, 4
     sw $t0, estado
 
+    # Mostrar la ultima posicion tras consumir comida
+    jal dibujar_serpiente
+
+    # Actualizar record
     jal actualizar_record
 
     li $v0, 4
     la $a0, msg_victoria
     syscall
 
-
-# ==============================================
+# =========================
 # RESULTADO Y REINICIO
-# ==============================================
+# =========================
 
 mostrar_resultado:
 
@@ -306,9 +326,9 @@ esperar_resultado:
     j esperar_resultado
 
 
-# ==============================================
+# =========================
 # SALIR DEL PROGRAMA
-# ==============================================
+# =========================
 
 salir_juego:
 
@@ -342,10 +362,23 @@ iniciar_serpiente:
     li $t2, 3
     sw $t2, longitud
 
+    # Reiniciar direccion y puntuacion
     sw $zero, direccion
     sw $zero, puntos
 
+    # Reiniciar dificultad
+    li $t0, 180
+    sw $t0, velocidad_ms
+
+    li $t0, 1
+    sw $t0, nivel
+
+    # Reiniciar contador de alimentos
+    sw $zero, comidas_consumidas
+    sw $zero, tipo_comida
+
     jr $ra
+
 
 
 # PINTAR CELDA
@@ -654,16 +687,42 @@ revisar_obstaculos_comida:
     # Si esta libre, aceptar comida
     j comida_valida
 
+
 comida_valida:
 
+    # Guardar coordenadas de la comida
     sw $s0, comida_x
     sw $s1, comida_y
 
+    # Por defecto, comida normal
+    sw $zero, tipo_comida
+
+    # Revisar contador de alimentos
+    lw $t0, comidas_consumidas
+
+    li $t1, 3
+    beq $t0, $t1, generar_especial
+
+    # Comida normal de color rojo
+    lw $a2, color_comida
+    j pintar_comida
+
+generar_especial:
+
+    # Marcar comida especial
+    li $t0, 1
+    sw $t0, tipo_comida
+
+    # Color amarillo
+    lw $a2, color_especial
+
+pintar_comida:
+
     move $a0, $s0
     move $a1, $s1
-    lw $a2, color_comida
 
     jal pintar_celda
+
 
     lw $s4, 8($sp)
     lw $s3, 12($sp)
@@ -682,7 +741,6 @@ comida_valida:
 # v0 = 1 colision
 # v0 = 2 comida consumida
 # v0 = 3 tablero completado
-
 
 mover_serpiente:
 
@@ -813,14 +871,62 @@ actualizar_posiciones:
 
     j desplazar_segmentos
 
+
+# ====================================
+# AUMENTAR LONGITUD Y PUNTUACION
+# ====================================
+
 aumentar_longitud:
 
+    # Aumentar un segmento
     addiu $s2, $s2, 1
     sw $s2, longitud
 
-    lw $t0, puntos
-    addiu $t0, $t0, 10
-    sw $t0, puntos
+    # Revisar el tipo de alimento
+    lw $t0, tipo_comida
+
+    beq $t0, $zero, sumar_normal
+
+    # Comida especial: +30 puntos
+    lw $t1, puntos
+    addiu $t1, $t1, 30
+    sw $t1, puntos
+
+    # Mostrar mensaje
+    li $v0, 4
+    la $a0, msg_especial
+    syscall
+
+    j actualizar_comidas
+
+sumar_normal:
+
+    # Comida normal: +10 puntos
+    lw $t1, puntos
+    addiu $t1, $t1, 10
+    sw $t1, puntos
+
+actualizar_comidas:
+
+    # Avanzar contador de alimentos
+    lw $t0, comidas_consumidas
+    addiu $t0, $t0, 1
+
+    # Reiniciar al llegar a 4
+    li $t1, 4
+    blt $t0, $t1, guardar_contador
+
+    move $t0, $zero
+
+guardar_contador:
+    sw $t0, comidas_consumidas
+
+    # Ajustar velocidad segun puntuacion
+    jal actualizar_velocidad
+
+    # Continuar desplazando segmentos
+    j desplazar_segmentos
+
 
 desplazar_segmentos:
 
@@ -854,7 +960,15 @@ colocar_cabeza:
     sw $s3, 0($s0)
     sw $s4, 0($s1)
 
-    li $t0, 900
+    # Victoria al alcanzar la meta
+    lw $t0, meta_puntos
+    lw $t1, puntos
+
+    bge $t1, $t0, movimiento_victoria
+
+    # Victoria si ocupa todo el espacio libre
+    # 900 celdas interiores - 12 obstaculos
+    li $t0, 888
     bge $s2, $t0, movimiento_victoria
 
     beq $s5, $zero, movimiento_normal
@@ -890,9 +1004,9 @@ fin_movimiento:
 
 
 
-# ==============================================
+# =================================
 # ACTUALIZAR HIGH SCORE
-# ==============================================
+# =================================
 
 actualizar_record:
 
@@ -909,9 +1023,9 @@ fin_actualizar_record:
     jr $ra
 
 
-# ==============================================
+# ======================
 # MOSTRAR HIGH SCORE
-# ==============================================
+# ======================
 
 mostrar_record:
 
@@ -931,9 +1045,9 @@ mostrar_record:
 
     jr $ra
 
-# ==============================================
+# ====================================
 # MOSTRAR PUNTUACION ACTUAL
-# ==============================================
+# ====================================
 
 mostrar_puntos:
     li $v0, 4
@@ -952,9 +1066,9 @@ mostrar_puntos:
 
 
 
-# ==============================================
+# ==============================
 # DIBUJAR OBSTACULOS
-# ==============================================
+# ==============================
 
 dibujar_obstaculos:
 
@@ -1061,5 +1175,95 @@ choque_obstaculo:
 sin_obstaculo:
 
     move $v0, $zero
+    jr $ra
+
+
+
+# ==============================================
+# ACTUALIZAR VELOCIDAD
+# Disminuye el tiempo entre movimientos
+# segun la puntuacion obtenida
+# ==============================================
+
+actualizar_velocidad:
+
+    # Leer puntuacion
+    lw $t0, puntos
+
+    # Nivel 6: 150 puntos o mas
+    li $t1, 150
+    bge $t0, $t1, velocidad_6
+
+    # Nivel 5: 120 puntos
+    li $t1, 120
+    bge $t0, $t1, velocidad_5
+
+    # Nivel 4: 90 puntos
+    li $t1, 90
+    bge $t0, $t1, velocidad_4
+
+    # Nivel 3: 60 puntos
+    li $t1, 60
+    bge $t0, $t1, velocidad_3
+
+    # Nivel 2: 30 puntos
+    li $t1, 30
+    bge $t0, $t1, velocidad_2
+
+    # Nivel 1
+    li $t2, 180
+    li $t3, 1
+    j guardar_velocidad
+
+velocidad_2:
+    li $t2, 155
+    li $t3, 2
+    j guardar_velocidad
+
+velocidad_3:
+    li $t2, 130
+    li $t3, 3
+    j guardar_velocidad
+
+velocidad_4:
+    li $t2, 105
+    li $t3, 4
+    j guardar_velocidad
+
+velocidad_5:
+    li $t2, 80
+    li $t3, 5
+    j guardar_velocidad
+
+velocidad_6:
+    li $t2, 65
+    li $t3, 6
+
+guardar_velocidad:
+
+    # Guardar tiempo entre movimientos
+    sw $t2, velocidad_ms
+
+    # Revisar si cambio el nivel
+    lw $t4, nivel
+    beq $t4, $t3, fin_velocidad
+
+    # Guardar nuevo nivel
+    sw $t3, nivel
+
+    # Mostrar informacion
+    li $v0, 4
+    la $a0, msg_nivel
+    syscall
+
+    li $v0, 1
+    lw $a0, nivel
+    syscall
+
+    li $v0, 4
+    la $a0, salto
+    syscall
+
+fin_velocidad:
     jr $ra
 
